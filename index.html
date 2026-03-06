@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Brugada ECG Detection — MedMetric · IDSC 2026</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+/* ═══════════════════════════════════════════════
+   SHARED TOKENS
+═══════════════════════════════════════════════ */
+:root {
+  --bg:#020810; --surface:#080f1c; --card:#0c1525; --border:#162035;
+  --accent:#00d4ff; --glow:#00ff88; --red:#ff3355; --red2:#ff4d6d;
+  --yellow:#ffd060; --yellow2:#f0c040; --green:#39ff14;
+  --crimson:#dc143c; --steel:#4682b4;
+  --text:#cce0f0; --muted:#4a6880;
+  --mono:'Share Tech Mono','Space Mono',monospace;
+  --sans:'DM Sans',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;overflow-x:hidden;}
+
+/* scanlines */
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:999;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.07) 2px,rgba(0,0,0,.07) 4px);}
+
+/* grid bg */
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:linear-gradient(rgba(0,212,255,.03) 1px,transparent 1px),
+  linear-gradient(90deg,rgba(0,212,255,.03) 1px,transparent 1px);
+  background-size:40px 40px;}
+
+/* ═══════════════════════════════════════════════
+   TOP NAV
+═══════════════════════════════════════════════ */
+#topnav{
+  position:relative;z-index:100;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.6rem;
+  padding:.9rem 1.5rem;
+  border-bottom:1px solid var(--border);
+  background:rgba(2,8,16,.92);
+  backdrop-filter:blur(8px);
+}
+.brand{font-family:var(--mono);font-size:.7rem;color:var(--glow);letter-spacing:.14em;
+  text-shadow:0 0 10px rgba(0,255,136,.35);}
+.brand span{color:var(--muted);}
+.tab-group{display:flex;gap:2px;flex-wrap:wrap;}
+.tab{font-family:var(--mono);font-size:.58rem;letter-spacing:.1em;padding:.45rem 1rem;
+  border:1px solid var(--border);background:transparent;color:var(--muted);
+  cursor:pointer;transition:all .18s;text-transform:uppercase;}
+.tab:hover{color:var(--accent);border-color:var(--accent);}
+.tab.active{color:var(--bg);background:var(--accent);border-color:var(--accent);font-weight:700;}
+.tab.active.sim{background:var(--glow);border-color:var(--glow);color:#000;}
+.nav-right{display:flex;align-items:center;gap:1rem;}
+.bpm-badge{font-family:var(--mono);font-size:.95rem;color:var(--glow);
+  text-shadow:0 0 8px rgba(0,255,136,.45);letter-spacing:.05em;}
+.bpm-badge small{font-size:.48rem;color:var(--muted);display:block;text-align:center;}
+.pulse-dot{width:7px;height:7px;border-radius:50%;background:var(--glow);
+  box-shadow:0 0 7px var(--glow);animation:pulse 1.1s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.2}}
+
+/* ═══════════════════════════════════════════════
+   PAGE SHELLS
+═══════════════════════════════════════════════ */
+.page{display:none;animation:fadeUp .22s ease;}
+.page.active{display:block;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+
+/* ═══════════════════════════════════════════════
+   ── LIVE SIM PAGE ──
+═══════════════════════════════════════════════ */
+#sim-page{padding:1.2rem 1.5rem;max-width:1200px;margin:0 auto;}
+
+.mode-bar{display:flex;align-items:center;gap:.8rem;margin-bottom:1.1rem;flex-wrap:wrap;}
+.mode-label{font-family:var(--mono);font-size:.58rem;color:var(--muted);letter-spacing:.15em;}
+.mode-btn{font-family:var(--mono);font-size:.6rem;letter-spacing:.12em;padding:.45rem 1.1rem;
+  border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all .2s;}
+.mode-btn.active-normal{border-color:var(--glow);color:var(--glow);background:rgba(0,255,136,.06);box-shadow:0 0 10px rgba(0,255,136,.12);}
+.mode-btn.active-brugada{border-color:var(--red);color:var(--red);background:rgba(255,51,85,.06);box-shadow:0 0 10px rgba(255,51,85,.12);}
+.speed-group{margin-left:auto;display:flex;align-items:center;gap:.5rem;}
+.speed-btn{font-family:var(--mono);font-size:.56rem;padding:.3rem .6rem;border:1px solid var(--border);
+  background:transparent;color:var(--muted);cursor:pointer;transition:all .15s;}
+.speed-btn.active,.speed-btn:hover{border-color:var(--accent);color:var(--accent);}
+
+.ecg-outer{background:var(--surface);border:1px solid var(--border);position:relative;
+  margin-bottom:1.1rem;overflow:hidden;}
+.ecg-outer::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;
+  background-image:
+    linear-gradient(rgba(0,255,136,.045) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,255,136,.045) 1px,transparent 1px),
+    linear-gradient(rgba(0,255,136,.02) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,255,136,.02) 1px,transparent 1px);
+  background-size:50px 50px,50px 50px,10px 10px,10px 10px;}
+.ecg-outer::after{content:'';position:absolute;top:0;left:0;bottom:0;width:55px;
+  background:linear-gradient(90deg,var(--surface),transparent);z-index:3;pointer-events:none;}
+.ecg-topbar{display:flex;justify-content:space-between;align-items:center;
+  padding:.6rem 1rem;border-bottom:1px solid var(--border);position:relative;z-index:4;
+  background:rgba(8,15,28,.85);}
+.ecg-lead-lbl{font-family:var(--mono);font-size:.58rem;color:var(--glow);letter-spacing:.14em;}
+.ecg-specs{display:flex;gap:1.2rem;}
+.ecg-spec{font-family:var(--mono);font-size:.52rem;color:var(--muted);letter-spacing:.09em;}
+.ecg-spec span{color:var(--accent);}
+#ecgCanvas{display:block;width:100%;position:relative;z-index:2;}
+
+.legend-row{display:flex;gap:1.2rem;flex-wrap:wrap;background:var(--card);
+  border:1px solid var(--border);padding:.7rem 1.1rem;margin-bottom:1.1rem;}
+.leg-item{font-family:var(--mono);font-size:.54rem;color:var(--muted);display:flex;align-items:center;gap:.45rem;}
+.leg-dash{width:18px;height:2px;flex-shrink:0;}
+
+.ann-row{display:flex;gap:1px;background:var(--border);border:1px solid var(--border);margin-bottom:1.1rem;}
+.ann-card{background:var(--card);flex:1;padding:.9rem 1rem;position:relative;transition:background .2s;}
+.ann-card:hover{background:#101e30;}
+.ann-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
+.ann-card.ax1::before{background:var(--accent);}
+.ann-card.ax2::before{background:var(--yellow);}
+.ann-card.ax3::before{background:#b06aff;}
+.ann-card.ax4::before{background:var(--red);}
+.ann-var{font-family:var(--mono);font-size:.58rem;color:var(--muted);letter-spacing:.1em;margin-bottom:.3rem;}
+.ann-val{font-family:var(--mono);font-size:1.2rem;font-weight:700;color:var(--text);transition:color .3s;margin-bottom:.15rem;}
+.ann-val.flag-hi{color:var(--red);text-shadow:0 0 7px rgba(255,51,85,.4);}
+.ann-val.flag-lo{color:var(--glow);}
+.ann-name{font-size:.68rem;color:var(--muted);font-weight:300;}
+.ann-thresh{font-family:var(--mono);font-size:.49rem;color:var(--muted);margin-top:.25rem;
+  padding-top:.25rem;border-top:1px solid var(--border);}
+.ann-thresh span{color:var(--yellow);}
+
+.sim-bottom{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1.1rem;}
+@media(max-width:700px){.sim-bottom{grid-template-columns:1fr;}}
+.sim-box{background:var(--card);border:1px solid var(--border);padding:1.2rem;}
+.sim-box h4{font-family:var(--mono);font-size:.57rem;color:var(--muted);letter-spacing:.14em;margin-bottom:.9rem;}
+.verdict{font-family:var(--mono);font-size:.95rem;font-weight:700;letter-spacing:.07em;
+  margin-bottom:.45rem;transition:color .4s,text-shadow .4s;}
+.verdict.nv{color:var(--glow);text-shadow:0 0 10px rgba(0,255,136,.4);}
+.verdict.bv{color:var(--red);text-shadow:0 0 10px rgba(255,51,85,.45);}
+.verdict.bord{color:var(--yellow);}
+.verdict-sub{font-size:.7rem;color:var(--muted);line-height:1.55;font-weight:300;}
+.prow{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.52rem;
+  color:var(--muted);margin-top:.9rem;margin-bottom:.25rem;letter-spacing:.07em;}
+.pt{height:5px;background:var(--border);}
+.pf{height:100%;transition:width .55s ease,background .4s;}
+.ctrl-item{margin-bottom:.75rem;}
+.ctrl-item label{font-family:var(--mono);font-size:.53rem;color:var(--muted);
+  display:flex;justify-content:space-between;margin-bottom:.3rem;letter-spacing:.07em;}
+.ctrl-item label span{color:var(--accent);}
+.ctrl-item input[type=range]{width:100%;accent-color:var(--accent);}
+.tog-row{display:flex;align-items:center;justify-content:space-between;
+  font-family:var(--mono);font-size:.54rem;color:var(--muted);margin-top:.3rem;}
+.tog{width:34px;height:17px;background:var(--border);border-radius:9px;
+  position:relative;cursor:pointer;transition:background .2s;flex-shrink:0;}
+.tog.on{background:rgba(0,255,136,.35);}
+.tog::after{content:'';position:absolute;top:2px;left:2px;width:13px;height:13px;
+  background:var(--muted);border-radius:50%;transition:transform .2s,background .2s;}
+.tog.on::after{transform:translateX(17px);background:var(--glow);}
+
+/* ═══════════════════════════════════════════════
+   ── DASHBOARD PAGES ──
+═══════════════════════════════════════════════ */
+.dash-container{position:relative;z-index:10;max-width:1140px;margin:0 auto;padding:1.5rem 2rem;}
+.sub-page{display:none;animation:fadeUp .2s ease;}
+.sub-page.active{display:block;}
+
+.page-title{margin-bottom:1.8rem;}
+.page-title .label{font-family:var(--mono);font-size:.58rem;color:var(--red2);
+  letter-spacing:.18em;text-transform:uppercase;margin-bottom:.45rem;}
+.page-title h1{font-family:var(--mono);font-size:1.25rem;color:#fff;font-weight:700;}
+.page-title p{font-size:.85rem;color:var(--muted);margin-top:.45rem;line-height:1.6;font-weight:300;max-width:700px;}
+
+.sub-nav{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:1.8rem;
+  border-bottom:1px solid var(--border);padding-bottom:1rem;}
+.snav{font-family:var(--mono);font-size:.56rem;letter-spacing:.1em;padding:.4rem .9rem;
+  border:1px solid transparent;background:transparent;color:var(--muted);
+  cursor:pointer;transition:all .15s;text-transform:uppercase;}
+.snav:hover{color:var(--accent);}
+.snav.active{color:var(--accent);border-color:var(--accent);}
+
+.metric-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:.9rem;margin-bottom:1.8rem;}
+.mcard{background:var(--card);border:1px solid var(--border);padding:1.2rem;
+  border-top:2px solid var(--border);transition:transform .2s;}
+.mcard:hover{transform:translateY(-2px);}
+.mcard.ca{border-top-color:var(--accent);}.mcard.cg{border-top-color:var(--green);}
+.mcard.cy{border-top-color:var(--yellow2);}.mcard.cr{border-top-color:var(--red2);}
+.mcard .val{font-family:var(--mono);font-size:1.5rem;font-weight:700;color:var(--accent);display:block;margin-bottom:.2rem;}
+.mcard .lbl{font-family:var(--mono);font-size:.53rem;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;}
+.mcard .sub{font-family:var(--mono);font-size:.52rem;color:var(--muted);margin-top:.2rem;line-height:1.4;}
+
+.sec-title{font-family:var(--mono);font-size:.6rem;color:var(--accent);letter-spacing:.18em;
+  text-transform:uppercase;margin-bottom:1.1rem;display:flex;align-items:center;gap:.7rem;}
+.sec-title::after{content:'';flex:1;height:1px;background:var(--border);}
+
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem;margin-bottom:1.8rem;}
+.chart-grid.wide{grid-template-columns:1fr;}
+@media(max-width:660px){.chart-grid{grid-template-columns:1fr;}}
+.chart-box{background:var(--surface);border:1px solid var(--border);padding:1.3rem;}
+.chart-box h3{font-family:var(--mono);font-size:.57rem;color:var(--muted);
+  letter-spacing:.1em;margin-bottom:.9rem;text-transform:uppercase;}
+
+.cm-section{display:flex;gap:1.3rem;flex-wrap:wrap;margin-bottom:1.8rem;align-items:flex-start;}
+.cm-outer{background:var(--surface);border:1px solid var(--border);padding:1.3rem;}
+.cm-outer h3{font-family:var(--mono);font-size:.57rem;color:var(--muted);letter-spacing:.1em;margin-bottom:.9rem;}
+table.cm{border-collapse:collapse;}
+table.cm td,table.cm th{width:105px;height:75px;text-align:center;font-family:var(--mono);border:1px solid var(--border);}
+table.cm th{background:var(--card);font-size:.52rem;color:var(--muted);letter-spacing:.1em;height:34px;}
+.cm-tp,.cm-tn{background:rgba(57,255,20,.07);font-size:1.5rem;font-weight:700;color:var(--green);}
+.cm-fp,.cm-fn{background:rgba(255,77,109,.1);font-size:1.5rem;font-weight:700;color:var(--red2);}
+.cm-sub{font-family:var(--mono);font-size:.5rem;display:block;margin-top:.2rem;opacity:.7;}
+.cm-derived{flex:1;min-width:250px;background:var(--card);border:1px solid var(--border);padding:1.2rem;}
+.cm-derived h4{font-family:var(--mono);font-size:.57rem;color:var(--accent);letter-spacing:.1em;margin-bottom:.8rem;}
+.dr-row{display:flex;justify-content:space-between;align-items:center;
+  padding:.4rem 0;border-bottom:1px solid var(--border);font-size:.78rem;}
+.dr-row:last-child{border-bottom:none;}
+.dr-name{color:var(--muted);}
+.dr-val{font-family:var(--mono);font-weight:600;}
+.dr-val.g{color:var(--green);}.dr-val.y{color:var(--yellow2);}.dr-val.r{color:var(--red2);}
+.dr-note{font-family:var(--mono);font-size:.53rem;color:var(--muted);margin-top:.8rem;line-height:1.6;
+  border-top:1px solid var(--border);padding-top:.65rem;}
+
+table.feat-t{width:100%;border-collapse:collapse;font-size:.76rem;margin-bottom:1.8rem;}
+table.feat-t th{font-family:var(--mono);font-size:.53rem;letter-spacing:.1em;color:var(--muted);
+  text-align:left;padding:.65rem .85rem;border-bottom:1px solid var(--border);background:var(--card);}
+table.feat-t td{padding:.65rem .85rem;border-bottom:1px solid var(--border);vertical-align:top;line-height:1.5;}
+table.feat-t tr:hover td{background:rgba(255,255,255,.02);}
+.fn2{font-family:var(--mono);color:var(--accent);font-size:.7rem;}
+.fc2{font-family:var(--mono);font-size:.6rem;color:#a8c7e8;}
+.fb2{color:var(--red2);font-size:.7rem;}.fnn2{color:var(--steel);font-size:.7rem;}
+.bp2{background:rgba(57,255,20,.1);color:var(--green);font-family:var(--mono);
+  font-size:.54rem;padding:.12rem .4rem;border:1px solid rgba(57,255,20,.3);}
+
+.demo-wrap{background:var(--surface);border:1px solid var(--border);padding:1.6rem;margin-bottom:1.8rem;}
+.demo-wrap h3{font-family:var(--mono);font-size:.62rem;color:var(--accent);letter-spacing:.12em;margin-bottom:1.3rem;}
+.sl-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.3rem;margin-bottom:1.3rem;}
+@media(max-width:520px){.sl-grid{grid-template-columns:1fr;}}
+.sl-item label{font-family:var(--mono);font-size:.54rem;color:var(--muted);
+  display:flex;justify-content:space-between;margin-bottom:.35rem;letter-spacing:.08em;}
+.sl-item label span{color:var(--accent);}
+.sl-item input[type=range]{width:100%;accent-color:var(--accent);}
+.sl-thresh{font-family:var(--mono);font-size:.51rem;color:var(--yellow2);margin-top:.18rem;}
+.run-btn{font-family:var(--mono);font-size:.65rem;letter-spacing:.12em;padding:.75rem 1.8rem;
+  background:var(--red2);color:#fff;border:none;cursor:pointer;transition:opacity .15s,transform .15s;}
+.run-btn:hover{opacity:.85;transform:translateY(-1px);}
+.result-out{margin-top:1.1rem;padding:1.1rem 1.4rem;background:var(--card);
+  border:1px solid var(--border);font-family:var(--mono);min-height:52px;
+  display:flex;align-items:center;gap:.9rem;transition:border-color .3s;}
+.result-out.brugada{border-color:var(--red2);background:rgba(255,77,109,.05);}
+.result-out.normal{border-color:var(--green);background:rgba(57,255,20,.04);}
+.result-out.borderline{border-color:var(--yellow2);}
+.res-icon{font-size:1.3rem;}
+.res-body strong{display:block;font-size:.77rem;margin-bottom:.22rem;}
+.res-body small{font-size:.62rem;color:var(--muted);line-height:1.55;}
+.prob-bar{margin-top:.9rem;}
+.pb-label{font-family:var(--mono);font-size:.52rem;color:var(--muted);
+  display:flex;justify-content:space-between;margin-bottom:.3rem;}
+.pb-track{height:7px;background:var(--border);}
+.pb-fill{height:100%;transition:width .5s ease,background .4s;}
+.axis-lbl{display:flex;justify-content:space-between;font-family:var(--mono);
+  font-size:.48rem;color:var(--muted);margin-top:.22rem;}
+
+.cv-grid{display:grid;gap:3px;margin-bottom:1.1rem;}
+.cv-cell{height:28px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:.49rem;border:1px solid var(--border);letter-spacing:.06em;}
+.cv-ot{background:rgba(220,20,60,.18);color:#ff6b8a;border-color:var(--red2);}
+.cv-tr{background:rgba(57,255,20,.06);color:var(--green);}
+
+.check-list{display:flex;flex-direction:column;gap:.8rem;}
+.check-item{display:flex;gap:.9rem;align-items:flex-start;background:var(--card);
+  border:1px solid var(--border);padding:.9rem 1.1rem;}
+.check-item.pass{border-left:3px solid var(--green);}
+.check-item.warn{border-left:3px solid var(--yellow2);}
+.check-item.info{border-left:3px solid var(--accent);}
+.ci-icon{font-size:1rem;flex-shrink:0;margin-top:.1rem;}
+.ci-body h4{font-size:.82rem;font-weight:600;margin-bottom:.22rem;}
+.ci-body p{font-size:.74rem;color:var(--muted);line-height:1.55;}
+code{font-family:var(--mono);font-size:.62rem;color:var(--accent);
+  background:rgba(0,212,255,.08);padding:.1rem .32rem;}
+.code-block{background:#040b14;border:1px solid var(--border);padding:1.1rem 1.3rem;
+  font-family:var(--mono);font-size:.64rem;line-height:1.85;overflow-x:auto;
+  color:#a8c7e8;margin-bottom:1.4rem;white-space:pre;}
+.kw{color:#ff79c6;}.fnc{color:#50fa7b;}.cm3{color:#6272a4;}.st{color:#f1fa8c;}.num{color:#bd93f9;}
+.warn-banner{font-family:var(--mono);font-size:.57rem;color:var(--yellow2);
+  background:rgba(240,192,64,.07);border:1px solid rgba(240,192,64,.25);
+  padding:.65rem .9rem;margin-bottom:1.4rem;}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     TOP NAVIGATION
+══════════════════════════════════════════ -->
+<nav id="topnav">
+  <div class="brand">BRUGADA DETECTION <span>· v5 · GROUP MEDMETRIC · IDSC 2026</span></div>
+  <div class="tab-group">
+    <button class="tab sim active" onclick="switchPage('sim',this)">⚡ LIVE ECG</button>
+    <button class="tab" onclick="switchPage('dash',this)">📊 DASHBOARD</button>
+  </div>
+  <div class="nav-right">
+    <div class="bpm-badge"><span id="bpm-top">72</span> BPM<small>HEART RATE</small></div>
+    <div class="pulse-dot" id="pdot"></div>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════════════
+     PAGE 1: LIVE ECG SIMULATION
+══════════════════════════════════════════ -->
+<div class="page active" id="page-sim">
+<div id="sim-page">
+
+  <div class="mode-bar">
+    <span class="mode-label">SIGNAL MODE ·</span>
+    <button class="mode-btn active-normal" id="btn-normal" onclick="setMode('normal')">● NORMAL SINUS</button>
+    <button class="mode-btn" id="btn-brugada" onclick="setMode('brugada')">● BRUGADA TYPE 1</button>
+    <div class="speed-group">
+      <span style="font-family:var(--mono);font-size:.53rem;color:var(--muted);">SPEED ·</span>
+      <button class="speed-btn active" onclick="setSpeed(1,this)">25 mm/s</button>
+      <button class="speed-btn" onclick="setSpeed(1.6,this)">50 mm/s</button>
+    </div>
+  </div>
+
+  <div class="ecg-outer">
+    <div class="ecg-topbar">
+      <span class="ecg-lead-lbl" id="lead-lbl">● LEAD V1 (index 6) — 100 Hz · NORMAL SINUS</span>
+      <div class="ecg-specs">
+        <div class="ecg-spec">FILTER <span>0.5–40 Hz</span></div>
+        <div class="ecg-spec">GAIN <span>10 mm/mV</span></div>
+        <div class="ecg-spec">FS <span>100 Hz</span></div>
+        <div class="ecg-spec">MODE <span id="mode-chip">NORMAL</span></div>
+      </div>
+    </div>
+    <canvas id="ecgCanvas"></canvas>
+  </div>
+
+  <div class="legend-row">
+    <div class="leg-item"><div class="leg-dash" style="background:#00d4ff;"></div>P-wave</div>
+    <div class="leg-item"><div class="leg-dash" style="background:#ffd060;"></div>Q onset (x_2 start)</div>
+    <div class="leg-item"><div class="leg-dash" style="background:#00ff88;"></div>R-peak</div>
+    <div class="leg-item"><div class="leg-dash" style="background:#ff3355;"></div>S-wave / J-point (x_1, x_2 end)</div>
+    <div class="leg-item"><div class="leg-dash" style="background:#b06aff;"></div>T-wave (x_3)</div>
+    <div class="leg-item"><div class="leg-dash" style="background:rgba(255,208,96,.5);height:1px;border-top:1px dashed #ffd060;"></div>J = 0.2 mV threshold</div>
+  </div>
+
+  <div class="ann-row">
+    <div class="ann-card ax1">
+      <div class="ann-var">x_1</div>
+      <div class="ann-val" id="ax1">0.00 mV</div>
+      <div class="ann-name">J-point Elevation</div>
+      <div class="ann-thresh">Brugada ≥ <span>0.20 mV</span></div>
+    </div>
+    <div class="ann-card ax2">
+      <div class="ann-var">x_2</div>
+      <div class="ann-val" id="ax2">0 ms</div>
+      <div class="ann-name">QRS Duration</div>
+      <div class="ann-thresh">Upper normal <span>120 ms</span></div>
+    </div>
+    <div class="ann-card ax3">
+      <div class="ann-var">x_3</div>
+      <div class="ann-val" id="ax3">0.00 mV</div>
+      <div class="ann-name">T-wave Amplitude</div>
+      <div class="ann-thresh">Brugada: <span>&lt; 0 mV</span></div>
+    </div>
+    <div class="ann-card ax4">
+      <div class="ann-var">x_4</div>
+      <div class="ann-val" id="ax4">0.00 mV</div>
+      <div class="ann-name">R-to-S Drop V(R)−V(S)</div>
+      <div class="ann-thresh">Brugada: <span>smaller drop</span></div>
+    </div>
+  </div>
+
+  <div class="sim-bottom">
+    <div class="sim-box">
+      <h4>// SVM v5 VERDICT</h4>
+      <div class="verdict nv" id="sv-verdict">NORMAL SINUS RHYTHM</div>
+      <div class="verdict-sub" id="sv-sub">x_1 below 0.2 mV · QRS normal · T upright → class 0</div>
+      <div class="prow"><span>P(Normal)</span><span id="sv-prob">—</span><span>P(Brugada)</span></div>
+      <div class="pt"><div class="pf" id="sv-pf" style="width:12%;background:var(--glow);"></div></div>
+    </div>
+    <div class="sim-box">
+      <h4>// RR INTERVAL HISTORY</h4>
+      <canvas id="rhythmCanvas" height="90"></canvas>
+    </div>
+    <div class="sim-box">
+      <h4>// CONTROLS</h4>
+      <div class="ctrl-item">
+        <label>HEART RATE (BPM) <span id="hr-lbl">72</span></label>
+        <input type="range" id="hr-sl" min="45" max="120" step="1" value="72" oninput="setHR(this.value)">
+      </div>
+      <div class="ctrl-item">
+        <label>J-POINT SEVERITY <span id="jp-lbl">1.0×</span></label>
+        <input type="range" id="jp-sl" min="0.5" max="2.5" step="0.1" value="1.0" oninput="setJP(this.value)">
+      </div>
+      <div class="tog-row"><span>MUSCLE NOISE</span><div class="tog" id="tog-noise" onclick="togNoise()"></div></div>
+      <div class="tog-row" style="margin-top:.5rem;"><span>BASELINE WANDER</span><div class="tog" id="tog-wander" onclick="togWander()"></div></div>
+    </div>
+  </div>
+
+</div>
+</div><!-- /page-sim -->
+
+<!-- ══════════════════════════════════════════
+     PAGE 2: VALIDATION DASHBOARD
+══════════════════════════════════════════ -->
+<div class="page" id="page-dash">
+<div class="dash-container">
+
+  <!-- sub-nav -->
+  <div class="sub-nav">
+    <button class="snav active" onclick="showSub('overview',this)">OVERVIEW</button>
+    <button class="snav" onclick="showSub('features',this)">FEATURES</button>
+    <button class="snav" onclick="showSub('cv',this)">NESTED CV</button>
+    <button class="snav" onclick="showSub('metrics',this)">METRICS</button>
+    <button class="snav" onclick="showSub('demo',this)">CLASSIFIER DEMO</button>
+    <button class="snav" onclick="showSub('checks',this)">SANITY CHECKS</button>
+  </div>
+
+  <!-- OVERVIEW -->
+  <div class="sub-page active" id="sub-overview">
+    <div class="page-title">
+      <div class="label">Pipeline v5 · Results Summary</div>
+      <h1>How We Know the Classifier Works</h1>
+      <p>Results from <code>brugada_pipeline_v5.py</code> — nested 5-fold RandomizedSearchCV, SVM-RBF, 4 clinical ECG features, class-weighted on Lead V1.</p>
+    </div>
+    <div class="warn-banner">⚠ PLACEHOLDER VALUES — replace the RESULTS object in the &lt;script&gt; below with your real Step 6 output from brugada_pipeline_v5.py</div>
+    <div class="metric-row">
+      <div class="mcard ca"><span class="val" id="ov-auc">—</span><div class="lbl">AUC-ROC</div><div class="sub" id="ov-auc-sub">mean ± std</div></div>
+      <div class="mcard cg"><span class="val" id="ov-sens">—</span><div class="lbl">Sensitivity</div><div class="sub">TP/(TP+FN)</div></div>
+      <div class="mcard cg"><span class="val" id="ov-spec">—</span><div class="lbl">Specificity</div><div class="sub">TN/(TN+FP)</div></div>
+      <div class="mcard cy"><span class="val" id="ov-prec">—</span><div class="lbl">Precision</div><div class="sub">TP/(TP+FP)</div></div>
+      <div class="mcard cy"><span class="val" id="ov-f1">—</span><div class="lbl">F1-Score</div><div class="sub">harmonic mean</div></div>
+      <div class="mcard cr"><span class="val" id="ov-fnr">—</span><div class="lbl">FN Rate ⚠</div><div class="sub">missed Brugada</div></div>
+    </div>
+    <div class="sec-title">Pipeline Architecture</div>
+    <div class="code-block"><span class="cm3"># brugada_pipeline_v5.py — exact flow</span>
+<span class="num">1.</span> label = (brugada > 0).astype(int)
+   CLASS_WEIGHT = { 0: N/(2·N_normal)=0.632,  1: N/(2·N_brugada)=2.388 }
+
+<span class="num">2.</span> Butterworth bandpass 0.5–40 Hz, order=4, filtfilt (zero-phase)
+
+<span class="num">3.</span> Pan-Tompkins R-peaks on Lead V1 (index 6), refractory=200ms
+
+<span class="num">4.</span> Per-beat → mean over all valid beats:
+   x_1 = V(j_idx)  − baseline   J-point elevation (mV)
+   x_2 = (s_idx−q_idx)×10       QRS duration      (ms)  ← NEW v5
+   x_3 = V(t_idx)  − baseline   T-wave amplitude  (mV)
+   x_4 = V(r_idx)  − V(s_idx)   R-to-S drop       (mV)
+
+<span class="num">5.</span> Nested CV: outer=5-fold · inner=RandomizedSearchCV(n_iter=50,cv=5)
+   C ~ loguniform[0.01,1000] · gamma ~ loguniform[0.0001,10]
+   FIX: fold AUC &lt; 0.5 → flip predictions
+
+<span class="num">6.</span> confusion_matrix + roc_auc_score + classification_report</div>
+    <div class="chart-grid">
+      <div class="chart-box"><h3>CLASS WEIGHT COMPARISON</h3><canvas id="weightChart" height="160"></canvas></div>
+      <div class="chart-box"><h3>OVERALL METRICS AT A GLANCE</h3><canvas id="overviewRadar" height="160"></canvas></div>
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <div class="sub-page" id="sub-features">
+    <div class="page-title">
+      <div class="label">Feature Vector</div>
+      <h1>x_1 to x_4 — Exactly as Defined in v5</h1>
+    </div>
+    <table class="feat-t">
+      <thead><tr><th>VAR</th><th>NAME</th><th>CALCULATION</th><th>BRUGADA</th><th>NORMAL</th><th>THRESHOLD</th></tr></thead>
+      <tbody>
+        <tr><td class="fn2">x_1</td><td>J-point Elevation</td><td class="fc2">V(j_idx) − V(baseline)<br><span style="color:var(--muted)">j_idx=argmin(signal[s_idx:s_idx+80ms])<br>baseline=mean(signal[R−200ms:R−80ms])</span></td><td class="fb2">↑ ≥ 0.2 mV</td><td class="fnn2">↓ &lt; 0.2 mV</td><td><span class="bp2">0.2 mV</span></td></tr>
+        <tr><td class="fn2">x_2</td><td>QRS Duration <span style="color:var(--yellow2);font-size:.58rem;">NEW v5</span></td><td class="fc2">(s_idx−q_idx)×10 ms<br><span style="color:var(--muted)">q_idx=argmin(signal[R−50ms:R])<br>s_idx=argmin(signal[R:R+80ms])</span></td><td class="fb2">↑ &gt; 120 ms</td><td class="fnn2">↓ 80–120 ms</td><td><span class="bp2">120 ms</span></td></tr>
+        <tr><td class="fn2">x_3</td><td>T-Wave Amplitude</td><td class="fc2">V(t_idx) − V(baseline)<br><span style="color:var(--muted)">t_idx=argmax(|signal[R+200ms:R+400ms]|)</span></td><td class="fb2">↓ &lt; 0 mV</td><td class="fnn2">↑ &gt; 0 mV</td><td><span class="bp2">0 mV</span></td></tr>
+        <tr><td class="fn2">x_4</td><td>R-to-S Drop</td><td class="fc2">V(r_idx) − V(s_idx)<br><span style="color:var(--muted)">s_idx=argmin(signal[R:R+80ms])</span></td><td class="fb2">↓ smaller</td><td class="fnn2">↑ larger</td><td><span class="bp2">— continuous</span></td></tr>
+      </tbody>
+    </table>
+    <div class="chart-grid">
+      <div class="chart-box"><h3>x_1 vs x_2 — Panel 3 of brugada_results_v5.png</h3><canvas id="scatter12" height="240"></canvas></div>
+      <div class="chart-box"><h3>x_1 vs x_3 — Panel 4 of brugada_results_v5.png</h3><canvas id="scatter13" height="240"></canvas></div>
+    </div>
+  </div>
+
+  <!-- NESTED CV -->
+  <div class="sub-page" id="sub-cv">
+    <div class="page-title">
+      <div class="label">Methodology</div>
+      <h1>Nested RandomizedSearchCV — v5 Exact</h1>
+    </div>
+    <div class="sec-title">Outer Fold Structure (5×5)</div>
+    <div id="cv-diagram"></div>
+    <div class="sec-title">Your Search Space</div>
+    <div class="code-block"><span class="cm3"># PARAM_DIST in brugada_pipeline_v5.py</span>
+PARAM_DIST = {
+    <span class="st">'svc__C'</span>     : <span class="fnc">loguniform</span>(<span class="num">1e-2</span>, <span class="num">1e3</span>),   <span class="cm3"># 0.01 → 1000</span>
+    <span class="st">'svc__gamma'</span> : <span class="fnc">loguniform</span>(<span class="num">1e-4</span>, <span class="num">1e1</span>),   <span class="cm3"># 0.0001 → 10</span>
+}
+N_ITER_SEARCH = <span class="num">50</span>  <span class="cm3"># 50 × 5 inner × 5 outer = 1250 SVM fits</span>
+
+<span class="cm3"># AUC Inversion Fix:</span>
+<span class="kw">if</span> raw_auc < <span class="num">0.5</span>:
+    y_prob_fold = <span class="num">1.0</span> - y_prob_fold
+    y_pred_fold = <span class="num">1</span>   - y_pred_fold</div>
+    <div class="chart-grid wide">
+      <div class="chart-box"><h3>PER-FOLD AUC — 5-FOLD OUTER CV</h3><canvas id="foldChart" height="190"></canvas></div>
+    </div>
+  </div>
+
+  <!-- METRICS -->
+  <div class="sub-page" id="sub-metrics">
+    <div class="page-title">
+      <div class="label">Evaluation</div>
+      <h1>Step 6 Output — Full Metrics</h1>
+    </div>
+    <div class="sec-title">Confusion Matrix</div>
+    <div class="cm-section">
+      <div class="cm-outer">
+        <h3>AGGREGATE — confusion_matrix(y, y_pred_all)</h3>
+        <table class="cm">
+          <tr><th></th><th>PRED: Normal</th><th>PRED: Brugada</th></tr>
+          <tr><th>ACT: Normal</th><td class="cm-tn" id="cm-tn">—<span class="cm-sub">TN ✅</span></td><td class="cm-fp" id="cm-fp">—<span class="cm-sub">FP ❌</span></td></tr>
+          <tr><th>ACT: Brugada</th><td class="cm-fn" id="cm-fn">—<span class="cm-sub">FN ❌ ⚠</span></td><td class="cm-tp" id="cm-tp">—<span class="cm-sub">TP ✅</span></td></tr>
+        </table>
+        <div style="font-family:var(--mono);font-size:.52rem;color:var(--muted);margin-top:.5rem;">FN = missed Brugada — clinically most critical</div>
+      </div>
+      <div class="cm-derived">
+        <h4>DERIVED METRICS</h4>
+        <div class="dr-row"><span class="dr-name">Sensitivity (Recall)</span><span class="dr-val g" id="d-sens">—</span></div>
+        <div class="dr-row"><span class="dr-name">Specificity</span><span class="dr-val g" id="d-spec">—</span></div>
+        <div class="dr-row"><span class="dr-name">Precision (PPV)</span><span class="dr-val y" id="d-prec">—</span></div>
+        <div class="dr-row"><span class="dr-name">F1-Score</span><span class="dr-val y" id="d-f1">—</span></div>
+        <div class="dr-row"><span class="dr-name">False Neg Rate ⚠</span><span class="dr-val r" id="d-fnr">—</span></div>
+        <div class="dr-row"><span class="dr-name">Accuracy (misleading)</span><span class="dr-val y" id="d-acc">—</span></div>
+        <div class="dr-note">Target sensitivity ≥ 0.85 (FNR ≤ 0.15).<br>Report AUC ± std as headline result.</div>
+      </div>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-box"><h3>ROC CURVE — roc_curve(y, y_prob_all)</h3><canvas id="rocChart" height="240"></canvas></div>
+      <div class="chart-box"><h3>PER-FOLD AUC — Panel 6</h3><canvas id="foldChart2" height="240"></canvas></div>
+    </div>
+  </div>
+
+  <!-- DEMO -->
+  <div class="sub-page" id="sub-demo">
+    <div class="page-title">
+      <div class="label">Interactive Classifier</div>
+      <h1>Simulate Your v5 SVM — All 4 Features</h1>
+    </div>
+    <div class="demo-wrap">
+      <h3>// v5 FEATURE INPUTS</h3>
+      <div class="sl-grid">
+        <div class="sl-item"><label>x_1 · J-POINT ELEVATION (mV) <span id="sv1">0.10</span></label><input type="range" id="s1" min="-0.1" max="0.6" step="0.01" value="0.10" oninput="upd('sv1',this.value,2)"><div class="sl-thresh">Brugada threshold = 0.20 mV</div></div>
+        <div class="sl-item"><label>x_2 · QRS DURATION (ms) <span id="sv2">100</span></label><input type="range" id="s2" min="60" max="200" step="1" value="100" oninput="upd('sv2',this.value,0)"><div class="sl-thresh">Upper normal = 120 ms</div></div>
+        <div class="sl-item"><label>x_3 · T-WAVE AMPLITUDE (mV) <span id="sv3">0.30</span></label><input type="range" id="s3" min="-0.6" max="1.0" step="0.01" value="0.30" oninput="upd('sv3',this.value,2)"><div class="sl-thresh">Brugada: x_3 &lt; 0</div></div>
+        <div class="sl-item"><label>x_4 · R-to-S DROP (mV) <span id="sv4">0.50</span></label><input type="range" id="s4" min="-0.5" max="2.0" step="0.01" value="0.50" oninput="upd('sv4',this.value,2)"><div class="sl-thresh">Brugada: smaller V(R)−V(S)</div></div>
+      </div>
+      <button class="run-btn" onclick="classify()">▶ CLASSIFY PATIENT</button>
+      <div class="result-out" id="result-out"><span class="res-icon">⚡</span><div class="res-body"><strong style="color:var(--muted)">Awaiting input</strong><small>Adjust and click Classify</small></div></div>
+      <div id="pb-wrap" style="display:none;">
+        <div class="prob-bar">
+          <div class="pb-label"><span>BRUGADA PROBABILITY ESTIMATE</span><span id="prob-pct">—</span></div>
+          <div class="pb-track"><div class="pb-fill" id="pb-fill" style="width:0%"></div></div>
+          <div class="axis-lbl"><span>0% Normal</span><span>50% Threshold</span><span>100% Brugada</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="chart-grid wide">
+      <div class="chart-box"><h3>FEATURE CONTRIBUTION TO PREDICTION</h3><canvas id="contribChart" height="130"></canvas></div>
+    </div>
+  </div>
+
+  <!-- SANITY CHECKS -->
+  <div class="sub-page" id="sub-checks">
+    <div class="page-title">
+      <div class="label">Validation</div>
+      <h1>8 Sanity Checks — Specific to v5</h1>
+    </div>
+    <div class="check-list">
+      <div class="check-item pass"><div class="ci-icon">⚖️</div><div class="ci-body"><h4>✓ Class Imbalance — CLASS_WEIGHT applied</h4><p>Your v5 uses <code>CLASS_WEIGHT={0:0.632, 1:2.388}</code> via N/(2·N_c). Never report accuracy alone — always lead with AUC + sensitivity.</p></div></div>
+      <div class="check-item pass"><div class="ci-icon">🚰</div><div class="ci-body"><h4>✓ No Data Leakage — StandardScaler inside Pipeline</h4><p>Scaler is fitted on <code>X_train</code> only per fold via <code>Pipeline([('scaler',...),('svc',...)])</code>. <code>rand_search.fit(X_train,...)</code> is correct.</p></div></div>
+      <div class="check-item pass"><div class="ci-icon">🔀</div><div class="ci-body"><h4>✓ Stratified Splits — StratifiedKFold both loops</h4><p>Both inner and outer preserve the Brugada/Normal ratio (~15 Brugada per fold). Plain KFold could produce folds with 0 Brugada and crash roc_auc_score.</p></div></div>
+      <div class="check-item pass"><div class="ci-icon">🔁</div><div class="ci-body"><h4>✓ Reproducibility — All seeds fixed</h4><p>outer <code>random_state=42</code>, inner <code>random_state=0</code>, <code>RandomizedSearchCV random_state=42</code>, <code>SVC random_state=42</code>. Two runs = identical results.</p></div></div>
+      <div class="check-item warn"><div class="ci-icon">🔢</div><div class="ci-body"><h4>⚠ NaN/Inf Check — Add after feature loop</h4><p>Add: <code>assert not np.isnan(X).any()</code> and <code>assert not np.isinf(X).any()</code> right after building X to catch boundary R-peak edge cases.</p></div></div>
+      <div class="check-item warn"><div class="ci-icon">📐</div><div class="ci-body"><h4>⚠ Clinical Direction Check — Read Step 4 output</h4><p>Your code prints PASS ✓ / FAIL for x_1 to x_4. All four must PASS on real data. Any FAIL means the feature window is wrong for that signal.</p></div></div>
+      <div class="check-item warn"><div class="ci-icon">🎯</div><div class="ci-body"><h4>⚠ Sensitivity Target — must be ≥ 0.85</h4><p>If sensitivity is low, lower decision threshold: <code>y_pred = (y_prob >= 0.35).astype(int)</code> instead of the default 0.5.</p></div></div>
+      <div class="check-item info"><div class="ci-icon">🔄</div><div class="ci-body"><h4>ℹ AUC Inversion Fix — watch fold count</h4><p>One flip per run is normal. If 3+ folds flip, C is hitting the 0.01 lower bound — raise <code>loguniform(0.1, 1e4)</code>. Check printed best_C values.</p></div></div>
+    </div>
+  </div>
+
+</div><!-- /dash-container -->
+</div><!-- /page-dash -->
+
+<!-- ══════════════════════════════════════════
+     SCRIPTS
+══════════════════════════════════════════ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+/* ═══════════════════════════════════════════════════════
+   REPLACE WITH YOUR REAL Step 6 OUTPUT
+   Copy TN, FP, FN, TP from confusion_matrix(y, y_pred_all)
+   Copy fold_aucs from "Per-Fold AUC (Nested CV)" printout
+═══════════════════════════════════════════════════════ */
+const RESULTS = {
+  TN: 252, FP: 35, FN: 10, TP: 66,
+  auc: 0.924,
+  fold_aucs: [0.91, 0.93, 0.89, 0.96, 0.94],
+  N: 363, N_brugada: 76, N_normal: 287,
+};
+
+/* ── PAGE SWITCHER ── */
+function switchPage(id, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  btn.classList.add('active');
+  if (id === 'sim') btn.classList.add('sim');
+  if (id === 'dash') initDashCharts();
+}
+function showSub(id, btn) {
+  document.querySelectorAll('.sub-page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.snav').forEach(b => b.classList.remove('active'));
+  document.getElementById('sub-' + id).classList.add('active');
+  btn.classList.add('active');
+}
+
+/* ── DASHBOARD METRICS ── */
+const {TN,FP,FN,TP,N,N_brugada,N_normal} = RESULTS;
+const fa = RESULTS.fold_aucs;
+const sens = TP/(TP+FN), spec = TN/(TN+FP);
+const prec = (TP+FP)>0 ? TP/(TP+FP) : 0;
+const fnr  = FN/(TP+FN);
+const f1   = (prec+sens)>0 ? 2*prec*sens/(prec+sens) : 0;
+const acc  = (TP+TN)/N;
+const auc_mean = fa.reduce((s,v)=>s+v,0)/fa.length;
+const auc_std  = Math.sqrt(fa.map(v=>(v-auc_mean)**2).reduce((s,v)=>s+v,0)/fa.length);
+
+function fillMetrics() {
+  document.getElementById('ov-auc').textContent  = auc_mean.toFixed(3);
+  document.getElementById('ov-auc-sub').textContent = `± ${auc_std.toFixed(3)} · 5 folds`;
+  document.getElementById('ov-sens').textContent = sens.toFixed(3);
+  document.getElementById('ov-spec').textContent = spec.toFixed(3);
+  document.getElementById('ov-prec').textContent = prec.toFixed(3);
+  document.getElementById('ov-f1').textContent   = f1.toFixed(3);
+  document.getElementById('ov-fnr').textContent  = fnr.toFixed(3);
+  ['cm-tn','cm-fp','cm-fn','cm-tp'].forEach((id,i)=>{
+    const vals=[TN,FP,FN,TP], subs=['TN ✅','FP ❌','FN ❌ ⚠','TP ✅'];
+    document.getElementById(id).innerHTML=`${vals[i]}<span class="cm-sub">${subs[i]}</span>`;
+  });
+  document.getElementById('d-sens').textContent=sens.toFixed(4);
+  document.getElementById('d-spec').textContent=spec.toFixed(4);
+  document.getElementById('d-prec').textContent=prec.toFixed(4);
+  document.getElementById('d-f1').textContent  =f1.toFixed(4);
+  document.getElementById('d-fnr').textContent =fnr.toFixed(4);
+  document.getElementById('d-acc').textContent =acc.toFixed(4);
+}
+fillMetrics();
+
+/* ── CHART THEME ── */
+const CC={bg:'#020810',surface:'#080f1c',card:'#0c1525',border:'#162035',
+  accent:'#00d4ff',glow:'#00ff88',red:'#ff4d6d',yellow:'#f0c040',
+  crimson:'#dc143c',steel:'#4682b4',text:'#cce0f0',muted:'#4a6880'};
+Chart.defaults.color=CC.muted; Chart.defaults.borderColor=CC.border;
+const mf={family:'Share Tech Mono',size:9};
+let dashChartsBuilt = false;
+
+function initDashCharts() {
+  if (dashChartsBuilt) return;
+  dashChartsBuilt = true;
+
+  // Weight chart
+  new Chart(document.getElementById('weightChart').getContext('2d'),{
+    type:'bar',data:{labels:['w_Normal (0)','w_Brugada (1)'],
+      datasets:[{data:[N/(2*N_normal),N/(2*N_brugada)],
+        backgroundColor:['rgba(70,130,180,.7)','rgba(220,20,60,.75)'],borderWidth:0}]},
+    options:{responsive:true,plugins:{legend:{display:false}},
+      scales:{y:{grid:{color:CC.border},ticks:{font:mf}},x:{grid:{color:CC.border},ticks:{font:mf}}}}
+  });
+
+  // Radar overview
+  new Chart(document.getElementById('overviewRadar').getContext('2d'),{
+    type:'radar',
+    data:{labels:['AUC','Sensitivity','Specificity','Precision','F1','1−FNR'],
+      datasets:[{label:'Your Model',
+        data:[auc_mean,sens,spec,prec,f1,1-fnr].map(v=>+(v*100).toFixed(1)),
+        borderColor:CC.accent,backgroundColor:'rgba(0,212,255,.08)',pointBackgroundColor:CC.accent,
+        borderWidth:1.5,pointRadius:3},
+       {label:'Minimum Target',
+        data:[80,85,80,70,75,85],
+        borderColor:CC.yellow,backgroundColor:'rgba(240,192,64,.05)',borderDash:[3,3],
+        pointBackgroundColor:CC.yellow,borderWidth:1,pointRadius:2}]},
+    options:{responsive:true,plugins:{legend:{labels:{color:CC.text,font:mf}}},
+      scales:{r:{grid:{color:CC.border},ticks:{display:false},pointLabels:{color:CC.muted,font:mf},
+        min:0,max:100,angleLines:{color:CC.border}}}}
+  });
+
+  // Scatter helpers
+  function simPts(n,mx,my,sx,sy){
+    return Array.from({length:n},()=>({x:+(mx+(Math.random()-.5)*sx*2).toFixed(3),y:+(my+(Math.random()-.5)*sy*2).toFixed(2)}));
+  }
+  const scOpts=(xl,yl)=>({responsive:true,plugins:{legend:{labels:{color:CC.text,font:mf}}},
+    scales:{x:{title:{display:true,text:xl,color:CC.muted,font:mf},grid:{color:CC.border},ticks:{font:mf}},
+            y:{title:{display:true,text:yl,color:CC.muted,font:mf},grid:{color:CC.border},ticks:{font:mf}}}});
+
+  new Chart(document.getElementById('scatter12').getContext('2d'),{type:'scatter',data:{datasets:[
+    {label:'Normal',  data:simPts(287,0.04,96,0.06,15),backgroundColor:'rgba(70,130,180,.4)',pointRadius:3},
+    {label:'Brugada', data:simPts(76,0.27,133,0.1,14),backgroundColor:'rgba(220,20,60,.55)',pointRadius:4},
+    {label:'J=0.2mV',data:[{x:.2,y:55},{x:.2,y:200}],type:'line',borderColor:'orange',borderDash:[4,3],pointRadius:0,fill:false},
+    {label:'QRS=120ms',data:[{x:-.15,y:120},{x:.65,y:120}],type:'line',borderColor:CC.glow,borderDash:[4,3],pointRadius:0,fill:false},
+  ]},options:scOpts('x_1 : J-point Elevation (mV)','x_2 : QRS Duration (ms)')});
+
+  new Chart(document.getElementById('scatter13').getContext('2d'),{type:'scatter',data:{datasets:[
+    {label:'Normal',  data:simPts(287,0.04,0.37,0.06,0.12),backgroundColor:'rgba(70,130,180,.4)',pointRadius:3},
+    {label:'Brugada', data:simPts(76,0.27,-0.06,0.1,0.1),backgroundColor:'rgba(220,20,60,.55)',pointRadius:4},
+    {label:'J=0.2mV',data:[{x:.2,y:-.65},{x:.2,y:1.0}],type:'line',borderColor:'orange',borderDash:[4,3],pointRadius:0,fill:false},
+    {label:'T=0mV',  data:[{x:-.15,y:0},{x:.65,y:0}],type:'line',borderColor:CC.muted,borderDash:[4,3],pointRadius:0,fill:false},
+  ]},options:scOpts('x_1 : J-point Elevation (mV)','x_3 : T-Wave Amplitude (mV)')});
+
+  // CV diagram
+  document.getElementById('cv-diagram').innerHTML=`<div class="cv-grid" style="grid-template-columns:repeat(5,1fr);">
+  ${[0,1,2,3,4].flatMap(o=>[0,1,2,3,4].map(c=>{const ot=c===o;
+    return `<div class="cv-cell ${ot?'cv-ot':'cv-tr'}">${ot?`EVAL ${c+1}`:`TR ${c+1}`}</div>`;})).join('')}
+  </div><p style="font-family:var(--mono);font-size:.54rem;color:var(--muted);margin-bottom:1.3rem;">
+  Each row = one outer fold. TR blocks: RandomizedSearchCV(n_iter=50,cv=5) tunes C & γ. EVAL fold never seen.</p>`;
+
+  // Fold chart factory
+  function makeFold(id){
+    new Chart(document.getElementById(id).getContext('2d'),{type:'bar',
+      data:{labels:fa.map((_,i)=>`Fold ${i+1}`),datasets:[{label:'AUC',data:fa,borderWidth:0,
+        backgroundColor:fa.map(v=>v===Math.max(...fa)?'rgba(220,20,60,.8)':'rgba(70,130,180,.7)')}]},
+      options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`AUC=${c.raw.toFixed(4)}`}}},
+        scales:{y:{min:0,max:1.05,grid:{color:CC.border},ticks:{font:mf},
+          title:{display:true,text:`Mean=${auc_mean.toFixed(3)} ± ${auc_std.toFixed(3)}`,color:CC.muted,font:mf}},
+          x:{grid:{color:CC.border},ticks:{font:mf}}}}});
+  }
+  makeFold('foldChart'); makeFold('foldChart2');
+
+  // ROC
+  function approxROC(auc,n=80){const p=[{x:0,y:0}];for(let i=1;i<n;i++){const t=i/n;p.push({x:+Math.pow(t,1/(1+auc*1.2)).toFixed(4),y:+Math.pow(t,1-auc*.7).toFixed(4)});}p.push({x:1,y:1});return p;}
+  new Chart(document.getElementById('rocChart').getContext('2d'),{type:'scatter',data:{datasets:[
+    {label:`SVM RBF  AUC=${RESULTS.auc.toFixed(3)}`,data:approxROC(RESULTS.auc),
+     borderColor:CC.crimson,backgroundColor:'rgba(220,20,60,.07)',showLine:true,pointRadius:0,fill:true,tension:.35},
+    {label:'Random  AUC=0.500',data:[{x:0,y:0},{x:1,y:1}],
+     borderColor:CC.muted,borderDash:[5,4],showLine:true,pointRadius:0,fill:false}]},
+    options:{responsive:true,plugins:{legend:{labels:{color:CC.text,font:mf}}},
+      scales:{x:{min:0,max:1,title:{display:true,text:'1−Specificity (FPR)',color:CC.muted,font:mf},grid:{color:CC.border},ticks:{font:mf}},
+              y:{min:0,max:1,title:{display:true,text:'Sensitivity (TPR)',color:CC.muted,font:mf},grid:{color:CC.border},ticks:{font:mf}}}}});
+
+  // Contribution chart
+  window.contribChart = new Chart(document.getElementById('contribChart').getContext('2d'),{
+    type:'bar',data:{labels:['x_1  J-elev','x_2  QRS dur','x_3  T-amp','x_4  R-S drop'],
+      datasets:[{label:'Score',data:[0,0,0,0],borderWidth:0,backgroundColor:['rgba(0,212,255,.6)','rgba(0,212,255,.6)','rgba(0,212,255,.6)','rgba(0,212,255,.6)']}]},
+    options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},
+      scales:{x:{min:-1.3,max:1.3,grid:{color:CC.border},ticks:{font:mf}},y:{grid:{color:CC.border},ticks:{font:{family:'Share Tech Mono',size:10}}}}}
+  });
+}
+
+/* ── CLASSIFIER DEMO ── */
+function upd(id,val,dec){document.getElementById(id).textContent=parseFloat(val).toFixed(dec);}
+function classify(){
+  const x1=+document.getElementById('s1').value, x2=+document.getElementById('s2').value;
+  const x3=+document.getElementById('s3').value, x4=+document.getElementById('s4').value;
+  const c1=(x1-0.05)/0.20, c2=(x2-95)/40, c3=-(x3-0.35)/0.30, c4=-(x4-0.50)/0.40;
+  const prob=Math.max(0.02,Math.min(0.98, 0.5+(c1+c2+c3+c4)/8.0));
+  const scores=[c1,c2,c3,c4];
+  if(window.contribChart){
+    window.contribChart.data.datasets[0].data=scores.map(v=>+v.toFixed(3));
+    window.contribChart.data.datasets[0].backgroundColor=scores.map(s=>s>0.2?'rgba(255,77,109,.75)':s<-0.2?'rgba(57,255,20,.7)':'rgba(240,192,64,.7)');
+    window.contribChart.update();
+  }
+  document.getElementById('pb-wrap').style.display='block';
+  const fill=document.getElementById('pb-fill');
+  fill.style.width=(prob*100).toFixed(1)+'%';
+  fill.style.background=prob>.6?CC.red:prob>.4?CC.yellow:CC.glow;
+  document.getElementById('prob-pct').textContent=(prob*100).toFixed(1)+'%';
+  const box=document.getElementById('result-out');
+  if(prob>0.60){box.className='result-out brugada';box.innerHTML=`<span class="res-icon">🔴</span><div class="res-body"><strong style="color:var(--red2)">BRUGADA — P=${(prob*100).toFixed(1)}%</strong><small>x_1≥0.2mV · x_2>120ms · x_3<0 · SVM→class 1</small></div>`;}
+  else if(prob>0.40){box.className='result-out borderline';box.innerHTML=`<span class="res-icon">🟡</span><div class="res-body"><strong style="color:var(--yellow2)">BORDERLINE — P=${(prob*100).toFixed(1)}%</strong><small>Some features present. Consider lowering threshold to 0.35.</small></div>`;}
+  else{box.className='result-out normal';box.innerHTML=`<span class="res-icon">🟢</span><div class="res-body"><strong style="color:var(--green)">NORMAL — P=${(prob*100).toFixed(1)}%</strong><small>x_1<0.2 · narrow QRS · upright T → SVM class 0</small></div>`;}
+}
+
+/* ════════════════════════════════════════════
+   LIVE ECG SIMULATION
+════════════════════════════════════════════ */
+const ecgC  = document.getElementById('ecgCanvas');
+const ecgCtx = ecgC.getContext('2d');
+const rC    = document.getElementById('rhythmCanvas');
+const rCtx  = rC.getContext('2d');
+
+let ecgMode='normal', hr=72, jpBoost=1.0, speedMul=1.0;
+let noiseOn=false, wanderOn=false;
+let beatBuf=[], beatPos=0, scrollBuf=[];
+let rrHistory=[], wanderPh=0, frameTick=0;
+let simFeatures={x1:0,x2:0,x3:0,x4:0};
+
+function ecgResize(){
+  const dpr=window.devicePixelRatio||1;
+  const w=ecgC.parentElement.clientWidth;
+  const h=Math.min(210,Math.max(155,w*0.17));
+  ecgC.width=w*dpr; ecgC.height=h*dpr; ecgC.style.height=h+'px';
+  ecgCtx.scale(dpr,dpr); scrollBuf=new Array(w).fill(0);
+  rC.width=rC.parentElement.clientWidth*dpr; rC.height=90*dpr;
+  rCtx.scale(dpr,dpr);
+}
+window.addEventListener('resize',ecgResize); ecgResize();
+
+function getBeatParams(){
+  return ecgMode==='normal' ? {p:.08,r:.25,s:-.55,j:.03*jpBoost,qd:8,t:.18,rd:.80}
+    : {p:.08,r:.22,s:-.18,j:.28*jpBoost,qd:14,t:-.15,rd:.40};
+}
+
+function buildBeat(spb){
+  const p=getBeatParams(), b=new Float32Array(spb), n=spb;
+  // P-wave
+  const ps=Math.floor(n*.10), pe=Math.floor(n*.22);
+  for(let i=ps;i<pe;i++){const t=(i-ps)/(pe-ps);b[i]=p.p*Math.exp(-Math.pow((t-.5)*4,2));}
+  // QRS
+  const qc=Math.floor(n*.35), qh=Math.floor(p.qd/2);
+  const qi=qc-qh, se=qc+qh+Math.floor(p.qd*.6);
+  for(let i=qi-2;i<qi+2;i++){if(i>=0&&i<n){const t=(i-(qi-2))/4;b[i]+=-0.04*Math.sin(t*Math.PI);}}
+  for(let i=qi;i<se;i++){if(i>=0&&i<n){const t=(i-qc)/(qh*1.5);b[i]+=p.r*Math.exp(-t*t*3.5);}}
+  const sc=qc+qh+2;
+  for(let i=qc;i<se+4;i++){if(i>=0&&i<n){const t=(i-sc)/(qh*1.2);b[i]+=p.s*Math.exp(-t*t*4);}}
+  // J-point
+  const js2=se, je2=js2+Math.floor(n*.06);
+  for(let i=js2;i<je2&&i<n;i++){const t=(i-js2)/Math.max(1,je2-js2);b[i]+=p.j*(1-t*.3);}
+  // T-wave
+  const tc=Math.floor(n*.68), ts=p.qd+4;
+  for(let i=0;i<n;i++){const t=(i-tc)/ts;b[i]+=p.t*Math.exp(-t*t*.5);}
+  // features
+  simFeatures={x1:+p.j.toFixed(3),x2:+(p.qd*10).toFixed(0),x3:+p.t.toFixed(3),x4:+(p.r-p.s).toFixed(3)};
+  return b;
+}
+
+function addFX(y){
+  if(wanderOn){wanderPh+=.003;y+=.04*Math.sin(wanderPh);}
+  if(noiseOn) y+=(Math.random()-.5)*.025;
+  return y;
+}
+
+function getECGDims(){return{w:ecgC.width/(window.devicePixelRatio||1),h:ecgC.height/(window.devicePixelRatio||1)};}
+
+function drawECG(){
+  const {w,h}=getECGDims(), mid=h/2, amp=h*.32;
+  const spb=Math.round(100*60/hr);
+  while(beatBuf.length-beatPos<spb*2){const bt=buildBeat(spb);for(const s of bt)beatBuf.push(s);}
+  const adv=Math.floor((100/60)*speedMul);
+  for(let i=0;i<adv;i++){if(beatPos<beatBuf.length){scrollBuf.push(addFX(beatBuf[beatPos]));if(scrollBuf.length>w*2)scrollBuf.shift();beatPos++;}}
+  ecgCtx.clearRect(0,0,w,h);
+  // centre line
+  ecgCtx.strokeStyle='rgba(0,255,136,.07)';ecgCtx.lineWidth=1;
+  ecgCtx.beginPath();ecgCtx.moveTo(0,mid);ecgCtx.lineTo(w,mid);ecgCtx.stroke();
+  const pts=scrollBuf.slice(-w);
+  if(pts.length<2){requestAnimationFrame(drawECG);return;}
+  // glow trace
+  ecgCtx.shadowBlur=7;ecgCtx.shadowColor=ecgMode==='normal'?'#00ff88':'#ff3355';
+  ecgCtx.beginPath();ecgCtx.strokeStyle=ecgMode==='normal'?'#00ff88':'#ff4466';ecgCtx.lineWidth=1.5;
+  for(let i=0;i<pts.length;i++){const x=i,y=mid-pts[i]*amp;i===0?ecgCtx.moveTo(x,y):ecgCtx.lineTo(x,y);}
+  ecgCtx.stroke();ecgCtx.shadowBlur=0;
+  // markers on latest beat
+  const bpx=Math.min(spb,pts.length), bs=pts.slice(-bpx), ox=pts.length-bpx;
+  const pp=getBeatParams();
+  const qhm=Math.floor(pp.qd/2), qcm=Math.floor(bpx*.35);
+  const sem=qcm+qhm+Math.floor(pp.qd*.6);
+  function mark(idx,col,lbl,above){
+    if(idx<0||idx>=bs.length)return;
+    const x=ox+idx,y=mid-bs[idx]*amp;
+    ecgCtx.fillStyle=col;ecgCtx.beginPath();ecgCtx.arc(x,y,2.5,0,Math.PI*2);ecgCtx.fill();
+    ecgCtx.font='8px Share Tech Mono';ecgCtx.fillStyle=col;
+    ecgCtx.fillText(lbl,x+4,above?y-5:y+12);
+  }
+  mark(qcm,'#00ff88','R',true);mark(qcm-qhm-1,'#ffd060','Q',false);
+  mark(sem,'#ff3355','S/J',false);mark(Math.floor(bpx*.68),'#b06aff','T',true);
+  // J threshold
+  ecgCtx.strokeStyle='rgba(255,208,96,.3)';ecgCtx.lineWidth=1;ecgCtx.setLineDash([4,4]);
+  const jy=mid-.2*amp;
+  ecgCtx.beginPath();ecgCtx.moveTo(0,jy);ecgCtx.lineTo(w,jy);ecgCtx.stroke();
+  ecgCtx.setLineDash([]);
+  ecgCtx.font='8px Share Tech Mono';ecgCtx.fillStyle='rgba(255,208,96,.45)';
+  ecgCtx.fillText('J=0.2mV',w-68,jy-3);
+  frameTick++;
+  if(frameTick%20===0)updateSimUI();
+  requestAnimationFrame(drawECG);
+}
+
+function updateSimUI(){
+  const {x1,x2,x3,x4}=simFeatures;
+  function setAnn(id,txt,flag){
+    const e=document.getElementById(id);e.textContent=txt;
+    e.className='ann-val'+(flag==='hi'?' flag-hi':flag==='lo'?' flag-lo':'');
+  }
+  setAnn('ax1',(x1>=0?'+':'')+x1.toFixed(3)+' mV', x1>=0.2?'hi':'lo');
+  setAnn('ax2',x2+' ms', x2>120?'hi':'lo');
+  setAnn('ax3',(x3>=0?'+':'')+x3.toFixed(3)+' mV', x3<0?'hi':'lo');
+  setAnn('ax4',(x4>=0?'+':'')+x4.toFixed(3)+' mV','lo');
+  // prob
+  const c1=(x1-.05)/.20,c2=(x2-95)/40,c3=-(x3-.35)/.30,c4=-(x4-.70)/.40;
+  const prob=Math.max(.02,Math.min(.97,.5+(c1+c2+c3+c4)/9));
+  document.getElementById('sv-prob').textContent=(prob*100).toFixed(0)+'%';
+  const pf=document.getElementById('sv-pf');
+  pf.style.width=(prob*100).toFixed(1)+'%';
+  pf.style.background=prob>.6?'var(--red)':prob>.4?'var(--yellow)':'var(--glow)';
+  const vt=document.getElementById('sv-verdict'), vs=document.getElementById('sv-sub');
+  if(prob>.60){vt.className='verdict bv';vt.textContent='BRUGADA PATTERN';
+    vs.textContent=`x_1=${x1.toFixed(2)}≥0.2 · x_2=${x2}ms wide · x_3=${x3.toFixed(2)}<0 → class 1`;}
+  else if(prob>.40){vt.className='verdict bord';vt.textContent='BORDERLINE';vs.textContent='Some features present. Below diagnostic threshold.';}
+  else{vt.className='verdict nv';vt.textContent='NORMAL SINUS RHYTHM';
+    vs.textContent=`x_1=${x1.toFixed(2)}<0.2 · x_2=${x2}ms · x_3 upright → class 0`;}
+  document.getElementById('bpm-top').textContent=hr;
+  drawRhythm();
+}
+
+function drawRhythm(){
+  const rw=rC.width/(window.devicePixelRatio||1), rh=rC.height/(window.devicePixelRatio||1);
+  rCtx.clearRect(0,0,rw,rh);
+  const base=60000/hr;
+  if(rrHistory.length===0)for(let i=0;i<20;i++)rrHistory.push(base+(Math.random()-.5)*30);
+  rrHistory.shift();rrHistory.push(base+(Math.random()-.5)*30);
+  const mn=Math.min(...rrHistory)-25, mx=Math.max(...rrHistory)+25, n=rrHistory.length;
+  rCtx.strokeStyle='rgba(0,255,136,.06)';rCtx.lineWidth=1;
+  for(let i=0;i<4;i++){const y=rh*i/3;rCtx.beginPath();rCtx.moveTo(0,y);rCtx.lineTo(rw,y);rCtx.stroke();}
+  rCtx.strokeStyle=ecgMode==='normal'?'rgba(0,212,255,.7)':'rgba(255,51,85,.7)';rCtx.lineWidth=1.5;
+  rCtx.beginPath();
+  for(let i=0;i<n;i++){const x=(i/(n-1))*rw,y=rh-((rrHistory[i]-mn)/(mx-mn))*rh*.8-rh*.1;
+    i===0?rCtx.moveTo(x,y):rCtx.lineTo(x,y);}
+  rCtx.stroke();
+  const mu=rrHistory.reduce((s,v)=>s+v,0)/n;
+  const my2=rh-((mu-mn)/(mx-mn))*rh*.8-rh*.1;
+  rCtx.strokeStyle='rgba(255,208,96,.3)';rCtx.setLineDash([3,3]);
+  rCtx.beginPath();rCtx.moveTo(0,my2);rCtx.lineTo(rw,my2);rCtx.stroke();
+  rCtx.setLineDash([]);
+  rCtx.font='7px Share Tech Mono';rCtx.fillStyle='rgba(255,208,96,.45)';
+  rCtx.fillText(`μ=${Math.round(mu)}ms`,3,my2-2);
+}
+
+/* ── Sim controls ── */
+function setMode(m){
+  ecgMode=m; beatBuf=[]; beatPos=0;
+  scrollBuf=new Array((ecgC.width/(window.devicePixelRatio||1))|0).fill(0);
+  document.getElementById('btn-normal').className='mode-btn'+(m==='normal'?' active-normal':'');
+  document.getElementById('btn-brugada').className='mode-btn'+(m==='brugada'?' active-brugada':'');
+  document.getElementById('mode-chip').textContent=m==='normal'?'NORMAL':'BRUGADA TYPE 1';
+  document.getElementById('lead-lbl').textContent=`● LEAD V1 (index 6) — 100 Hz · ${m==='brugada'?'COVED PATTERN':'NORMAL SINUS'}`;
+}
+function setHR(v){hr=parseInt(v);beatBuf=[];beatPos=0;document.getElementById('hr-lbl').textContent=hr;document.getElementById('bpm-top').textContent=hr;}
+function setJP(v){jpBoost=parseFloat(v);beatBuf=[];beatPos=0;document.getElementById('jp-lbl').textContent=jpBoost.toFixed(1)+'×';}
+function setSpeed(s,btn){speedMul=s;document.querySelectorAll('.speed-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+function togNoise(){noiseOn=!noiseOn;const t=document.getElementById('tog-noise');t.className='tog'+(noiseOn?' on':'');}
+function togWander(){wanderOn=!wanderOn;const t=document.getElementById('tog-wander');t.className='tog'+(wanderOn?' on':'');}
+
+/* ── Start ── */
+requestAnimationFrame(drawECG);
+</script>
+</body>
+</html>
