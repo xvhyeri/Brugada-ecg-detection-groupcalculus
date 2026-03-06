@@ -8,7 +8,7 @@ IDSC 2026 Machine Learning Challenge
 - Muhammad Zuhairi Bin Ahmad Rizal
 
 ## Group
-Calculus
+MedMetric
 
 ## Project Description
 This project develops a machine learning pipeline to detect Brugada Syndrome from ECG signals using the Brugada-HUCA dataset from PhysioNet.
@@ -32,4 +32,4 @@ https://physionet.org/content/brugada-huca/1.0.0/
 5. Train SVM classifier with nested cross-validation
 6. Evaluate using AUC, sensitivity, specificity
 
-## Project Structure
+
