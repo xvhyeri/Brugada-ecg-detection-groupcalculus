@@ -15,6 +15,9 @@ This project develops a machine learning pipeline to detect Brugada Syndrome fro
 
 The system extracts clinically meaningful ECG features and trains an SVM classifier to distinguish between normal and Brugada cases.
 
+## Live Website
+https://xvhyeri.github.io/Brugada-ecg-detection-groupMedMetric/
+
 ## Dataset
 Brugada-HUCA dataset from PhysioNet:
 
